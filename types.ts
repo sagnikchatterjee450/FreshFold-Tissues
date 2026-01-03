@@ -35,6 +35,7 @@ export interface VendorRequest {
   expectedDate: string;
   status: RequestStatus;
   createdAt: string;
+  discountPercentage?: number;
 }
 
 export interface OrderItem {
@@ -51,12 +52,14 @@ export interface Order {
   id: string;
   invoiceNumber: string;
   date: string;
-  customerId: string; // Could be vendorId or external customer
+  customerId: string;
   customerName: string;
   customerGstin?: string;
   items: OrderItem[];
   totalAmount: number;
   totalGst: number;
+  discountPercentage: number;
+  discountAmount: number;
   grandTotal: number;
 }
 

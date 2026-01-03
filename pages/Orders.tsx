@@ -11,7 +11,8 @@ import {
   Package,
   X,
   CreditCard,
-  Printer
+  Printer,
+  Percent
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -29,6 +30,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
   const [cart, setCart] = useState<{ productId: string; quantity: number }[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [customerGstin, setCustomerGstin] = useState('');
+  const [discountPercentage, setDiscountPercentage] = useState<number>(0);
 
   const filteredOrders = state.orders.filter(o => 
     o.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -55,10 +57,24 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
   }, [cart, state.products]);
 
   const totals = useMemo(() => {
-    const amount = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
-    const gst = cartItems.reduce((sum, item) => sum + (item.total - item.subtotal), 0);
-    return { amount, gst, grandTotal: amount + gst };
-  }, [cartItems]);
+    const rawSubtotal = cartItems.reduce((sum, item) => sum + item.subtotal, 0);
+    const discountAmount = (rawSubtotal * discountPercentage) / 100;
+    const taxableAmount = rawSubtotal - discountAmount;
+    
+    // Recalculate GST based on discounted taxable amount
+    // Note: In real scenarios, GST might be calculated per item after line-item discount
+    // Here we apply a global discount proportionally to the tax total for simplicity
+    const rawGstTotal = cartItems.reduce((sum, item) => sum + (item.total - item.subtotal), 0);
+    const finalGst = rawSubtotal > 0 ? (rawGstTotal * (taxableAmount / rawSubtotal)) : 0;
+    
+    return { 
+      amount: rawSubtotal, 
+      discountAmount, 
+      taxableAmount,
+      gst: finalGst, 
+      grandTotal: taxableAmount + finalGst 
+    };
+  }, [cartItems, discountPercentage]);
 
   const handleAddToCart = (productId: string) => {
     const product = state.products.find(p => p.id === productId);
@@ -110,11 +126,12 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       items: orderItems,
       totalAmount: totals.amount,
       totalGst: totals.gst,
+      discountPercentage: discountPercentage,
+      discountAmount: totals.discountAmount,
       grandTotal: totals.grandTotal,
     };
 
     updateState(prev => {
-      // Deduct stock
       const updatedProducts = prev.products.map(p => {
         const cartItem = cart.find(ci => ci.productId === p.id);
         if (cartItem) {
@@ -134,7 +151,8 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     setCart([]);
     setCustomerName('');
     setCustomerGstin('');
-    alert("Order created successfully! You can download the invoice from the orders table.");
+    setDiscountPercentage(0);
+    alert("Order created successfully!");
   };
 
   const generatePDF = (order: Order) => {
@@ -188,16 +206,28 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     // Totals
     const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.setFontSize(10);
-    doc.text("Subtotal:", 140, finalY);
-    doc.text(`INR ${order.totalAmount.toFixed(2)}`, 170, finalY);
     
-    doc.text("Total GST:", 140, finalY + 7);
-    doc.text(`INR ${order.totalGst.toFixed(2)}`, 170, finalY + 7);
+    let currentY = finalY;
+    doc.text("Subtotal:", 140, currentY);
+    doc.text(`INR ${order.totalAmount.toFixed(2)}`, 170, currentY);
+    
+    if (order.discountAmount > 0) {
+      currentY += 7;
+      doc.setTextColor(220, 38, 38); // Red for discount
+      doc.text(`Discount (${order.discountPercentage}%):`, 140, currentY);
+      doc.text(`- INR ${order.discountAmount.toFixed(2)}`, 170, currentY);
+      doc.setTextColor(0);
+    }
 
+    currentY += 7;
+    doc.text("Total GST:", 140, currentY);
+    doc.text(`INR ${order.totalGst.toFixed(2)}`, 170, currentY);
+
+    currentY += 9;
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    doc.text("Grand Total:", 140, finalY + 16);
-    doc.text(`INR ${order.grandTotal.toFixed(2)}`, 170, finalY + 16);
+    doc.text("Grand Total:", 140, currentY);
+    doc.text(`INR ${order.grandTotal.toFixed(2)}`, 170, currentY);
 
     // Footer
     doc.setFontSize(8);
@@ -222,7 +252,11 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
           />
         </div>
         <button 
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => {
+            setCart([]);
+            setDiscountPercentage(0);
+            setIsModalOpen(true);
+          }}
           className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition-all font-semibold"
         >
           <Plus size={20} />
@@ -238,7 +272,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                 <th className="px-6 py-4">Invoice No</th>
                 <th className="px-6 py-4">Customer</th>
                 <th className="px-6 py-4">Items</th>
-                <th className="px-6 py-4">Date</th>
+                <th className="px-6 py-4">Discount</th>
                 <th className="px-6 py-4">Total Amount</th>
                 <th className="px-6 py-4 text-right">Invoice</th>
               </tr>
@@ -255,7 +289,11 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                     {order.items.length} product(s)
                   </td>
                   <td className="px-6 py-4">
-                    {formatDate(order.date)}
+                    {order.discountPercentage > 0 ? (
+                      <span className="text-red-600 font-medium">-{order.discountPercentage}%</span>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 font-bold text-gray-900">
                     {formatCurrency(order.grandTotal)}
@@ -348,6 +386,22 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                       onChange={(e) => setCustomerGstin(e.target.value.toUpperCase())}
                     />
                   </div>
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase">Discount (%)</label>
+                    <div className="relative mt-1">
+                      <Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                      <input 
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white" 
+                        placeholder="0.0" 
+                        value={discountPercentage}
+                        onChange={(e) => setDiscountPercentage(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <h3 className="text-sm font-bold text-gray-800 mb-4 border-b border-gray-200 pb-2 flex items-center">
@@ -381,6 +435,12 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                     <span className="text-gray-500">Subtotal</span>
                     <span className="font-semibold">{formatCurrency(totals.amount)}</span>
                   </div>
+                  {totals.discountAmount > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-red-500 font-medium">Discount ({discountPercentage}%)</span>
+                      <span className="font-semibold text-red-600">-{formatCurrency(totals.discountAmount)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">GST Total</span>
                     <span className="font-semibold text-indigo-600">{formatCurrency(totals.gst)}</span>

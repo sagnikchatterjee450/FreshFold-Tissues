@@ -9,7 +9,8 @@ import {
   Plus,
   ArrowUpRight,
   Search,
-  X
+  X,
+  Percent
 } from 'lucide-react';
 import { AppState, VendorRequest, RequestStatus } from '../types';
 import { formatDate, generateId } from '../utils/format';
@@ -34,9 +35,6 @@ const Requests: React.FC<RequestsProps> = ({ state, updateState }) => {
       const requests = prev.requests.map(r => 
         r.id === requestId ? { ...r, status: newStatus } : r
       );
-
-      // If delivered, we might want to auto-increment stock if it was a raw material inbound?
-      // For simplicity here, we'll just track the request status.
       
       return { ...prev, requests };
     });
@@ -62,6 +60,7 @@ const Requests: React.FC<RequestsProps> = ({ state, updateState }) => {
       expectedDate: data.expectedDate as string,
       status: 'Pending',
       createdAt: new Date().toISOString(),
+      discountPercentage: parseFloat(data.discountPercentage as string) || 0
     };
 
     updateState(prev => ({
@@ -93,6 +92,7 @@ const Requests: React.FC<RequestsProps> = ({ state, updateState }) => {
                 <th className="px-6 py-4">Vendor</th>
                 <th className="px-6 py-4">Item & Qty</th>
                 <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4 text-center">Discount</th>
                 <th className="px-6 py-4">Exp. Delivery</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
@@ -117,6 +117,13 @@ const Requests: React.FC<RequestsProps> = ({ state, updateState }) => {
                         <Icon size={12} className="mr-1.5" />
                         {config.label}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      {req.discountPercentage ? (
+                        <span className="text-xs font-bold text-emerald-600">-{req.discountPercentage}%</span>
+                      ) : (
+                        <span className="text-gray-300">-</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-gray-600">
                       {formatDate(req.expectedDate)}
@@ -153,7 +160,7 @@ const Requests: React.FC<RequestsProps> = ({ state, updateState }) => {
                 );
               }) : (
                 <tr>
-                  <td colSpan={6} className="px-6 py-20 text-center text-gray-400">
+                  <td colSpan={7} className="px-6 py-20 text-center text-gray-400">
                     <ClipboardList size={48} className="mx-auto mb-4 opacity-10" />
                     <p>No requests found.</p>
                   </td>
@@ -198,6 +205,13 @@ const Requests: React.FC<RequestsProps> = ({ state, updateState }) => {
                   <div className="space-y-1">
                     <label className="text-sm font-semibold text-gray-700">Exp. Delivery *</label>
                     <input required type="date" name="expectedDate" className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-semibold text-gray-700">Negotiated Discount (%)</label>
+                  <div className="relative">
+                    <Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                    <input type="number" step="0.1" name="discountPercentage" className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0.0" />
                   </div>
                 </div>
               </div>
