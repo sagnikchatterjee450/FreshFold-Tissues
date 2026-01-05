@@ -21,7 +21,7 @@ import Requests from './pages/Requests';
 import Orders from './pages/Orders';
 import { AppState, Role } from './types';
 
-const STORAGE_KEY = 'tissue_inventory_data';
+const STORAGE_KEY = 'craftline_inventory_data';
 
 const INITIAL_STATE: AppState = {
   products: [],
@@ -57,7 +57,7 @@ const useRouteTitle = () => {
     case '/vendors': return 'Vendor Directory';
     case '/requests': return 'Vendor Requests';
     case '/orders': return 'Sales & Invoices';
-    default: return 'FreshFold Tissues';
+    default: return 'Craftline Production';
   }
 };
 
@@ -79,8 +79,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ state, updateState, isSidebarOpen
       >
         <div className="flex items-center justify-between p-4 border-b border-indigo-800">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center font-bold text-xl">F</div>
-            <span className="text-xl font-bold tracking-tight">FreshFold</span>
+            <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center font-bold text-xl">C</div>
+            <span className="text-xl font-bold tracking-tight">Craftline</span>
           </div>
           <button onClick={() => setIsSidebarOpen(false)} className="md:hidden">
             <X size={20} />
@@ -100,7 +100,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ state, updateState, isSidebarOpen
             <UserCircle size={24} />
             <div className="flex-1 overflow-hidden">
               <p className="text-sm font-medium truncate">Master Admin</p>
-              <p className="text-xs truncate opacity-70">admin@freshfold.com</p>
+              <p className="text-xs truncate opacity-70">admin@craftline.com</p>
             </div>
           </div>
         </div>
@@ -135,7 +135,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ state, updateState, isSidebarOpen
             <div className="h-8 w-px bg-gray-200 mx-2"></div>
             <button 
               className="flex items-center space-x-2 text-sm text-gray-700 font-medium hover:text-indigo-600 transition-colors"
-              onClick={() => alert('Logout clicked - would clear session in real app')}
+              onClick={() => alert('Logout clicked')}
             >
               <LogOut size={18} />
               <span className="hidden sm:inline">Logout</span>
