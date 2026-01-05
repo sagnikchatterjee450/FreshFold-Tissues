@@ -192,33 +192,42 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
   const generatePDF = (order: Order) => {
     const doc = new jsPDF();
     
+    // Header - Company Information
     doc.setFontSize(22);
-    doc.setTextColor(79, 70, 229);
-    doc.text("FRESHFOLD TISSUES", 14, 20);
+    doc.setTextColor(79, 70, 229); // Indigo-600
+    doc.setFont("helvetica", "bold");
+    doc.text("CRAFTLINE PRODUCTION", 14, 20);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text("Contact: 9038187747", 14, 28);
+    doc.setFont("helvetica", "italic");
+    doc.text("Manufacturer of Fresh Fold Tissue", 14, 27);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text("Contact: 9477110150", 14, 33);
+    doc.text("Email: craftlineproduction25@gmail.com", 14, 38);
 
     doc.setDrawColor(200);
-    doc.line(14, 35, 196, 35);
+    doc.line(14, 44, 196, 44);
 
+    // Customer & Invoice Details
     doc.setFontSize(12);
     doc.setTextColor(0);
-    doc.text("INVOICE TO:", 14, 45);
+    doc.text("INVOICE TO:", 14, 54);
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text(order.customerName, 14, 52);
+    doc.text(order.customerName, 14, 61);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    if (order.customerGstin) doc.text(`GSTIN: ${order.customerGstin}`, 14, 58);
+    if (order.customerGstin) doc.text(`GSTIN: ${order.customerGstin}`, 14, 67);
 
     doc.setFontSize(11);
-    doc.text(`Invoice No: ${order.invoiceNumber}`, 140, 45);
-    doc.text(`Date: ${formatDate(order.date)}`, 140, 51);
+    doc.text(`Invoice No: ${order.invoiceNumber}`, 140, 54);
+    doc.text(`Date: ${formatDate(order.date)}`, 140, 60);
 
+    // Items Table
     autoTable(doc, {
-      startY: 70,
+      startY: 75,
       head: [['Sl.', 'Product Name', 'Qty', 'Unit Price', 'GST%', 'Total (₹)']],
       body: order.items.map((item, i) => [
         i + 1,
@@ -233,6 +242,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       styles: { fontSize: 9 }
     });
 
+    // Summary Totals
     const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.setFontSize(10);
     
@@ -242,7 +252,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     
     if (order.discountAmount > 0) {
       currentY += 7;
-      doc.setTextColor(220, 38, 38);
+      doc.setTextColor(220, 38, 38); // Red for discount
       doc.text(`Discount (${order.discountPercentage}%):`, 140, currentY);
       doc.text(`- INR ${order.discountAmount.toFixed(2)}`, 170, currentY);
       doc.setTextColor(0);
@@ -258,10 +268,11 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     doc.text("Grand Total:", 140, currentY);
     doc.text(`INR ${order.grandTotal.toFixed(2)}`, 170, currentY);
 
+    // Footer
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(150);
-    doc.text("Thank you for your business! This is a computer generated invoice.", 14, 280);
+    doc.text("Thank you for choosing Craftline Production! This is a computer generated invoice.", 14, 280);
 
     doc.save(`${order.invoiceNumber}.pdf`);
   };
