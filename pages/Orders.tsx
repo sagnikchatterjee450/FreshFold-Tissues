@@ -3,20 +3,17 @@ import React, { useState, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
-  FileText, 
   Download, 
   ShoppingCart, 
   Trash2, 
-  User,
-  Package,
-  X,
+  X, 
   CreditCard,
-  Printer,
-  Percent
+  Percent,
+  RotateCcw
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { AppState, Order, OrderItem, Product } from '../types';
+import { AppState, Order, OrderItem } from '../types';
 import { formatCurrency, formatDate, generateId } from '../utils/format';
 
 interface OrdersProps {
@@ -27,12 +24,11 @@ interface OrdersProps {
 const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [cart, setCart] = useState<{ productId: string; quantity: number }[]>([]);
-  const [customerName, setCustomerName] = useState('');
-  const [customerGstin, setCustomerGstin] = useState('');
-  const [discountPercentage, setDiscountPercentage] = useState<number>(0);
   
-  // State to track the quantity being typed in the product grid
+  // Destructure cart session from global state
+  const { items: cart, customerName, customerGstin, discountPercentage } = state.cartSession;
+
+  // Local UI state for typed quantities in the product list
   const [selectionQuantities, setSelectionQuantities] = useState<Record<string, string>>({});
 
   const filteredOrders = state.orders.filter(o => 
@@ -91,8 +87,8 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       return;
     }
 
-    setCart(prev => {
-      const existing = prev.find(i => i.productId === productId);
+    updateState(prev => {
+      const existing = prev.cartSession.items.find(i => i.productId === productId);
       const currentQtyInCart = existing?.quantity || 0;
       const newTotalQty = currentQtyInCart + typedQty;
       
@@ -101,10 +97,17 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
         return prev;
       }
 
+      let newItems;
       if (existing) {
-        return prev.map(i => i.productId === productId ? { ...i, quantity: newTotalQty } : i);
+        newItems = prev.cartSession.items.map(i => i.productId === productId ? { ...i, quantity: newTotalQty } : i);
+      } else {
+        newItems = [...prev.cartSession.items, { productId, quantity: typedQty }];
       }
-      return [...prev, { productId, quantity: typedQty }];
+
+      return {
+        ...prev,
+        cartSession: { ...prev.cartSession, items: newItems }
+      };
     });
 
     // Reset quantity field for this product
@@ -123,15 +126,47 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       return;
     }
 
-    setCart(prev => prev.map(i => i.productId === productId ? { ...i, quantity: newQty } : i));
+    updateState(prev => ({
+      ...prev,
+      cartSession: {
+        ...prev.cartSession,
+        items: prev.cartSession.items.map(i => i.productId === productId ? { ...i, quantity: newQty } : i)
+      }
+    }));
   };
 
   const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(i => i.productId !== productId));
+    updateState(prev => ({
+      ...prev,
+      cartSession: {
+        ...prev.cartSession,
+        items: prev.cartSession.items.filter(i => i.productId !== productId)
+      }
+    }));
+  };
+
+  const updateSessionField = (field: keyof typeof state.cartSession, value: any) => {
+    updateState(prev => ({
+      ...prev,
+      cartSession: { ...prev.cartSession, [field]: value }
+    }));
+  };
+
+  const resetSession = () => {
+    if (confirm('Clear the current cart session?')) {
+      updateState(prev => ({
+        ...prev,
+        cartSession: {
+          items: [],
+          customerName: '',
+          customerGstin: '',
+          discountPercentage: 0
+        }
+      }));
+    }
   };
 
   const handleCreateOrder = () => {
-    // Filter items with 0 quantity if any
     const validCart = cartItems.filter(item => item.quantity > 0);
     
     if (!customerName || validCart.length === 0) {
@@ -176,15 +211,17 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       return {
         ...prev,
         products: updatedProducts,
-        orders: [newOrder, ...prev.orders]
+        orders: [newOrder, ...prev.orders],
+        cartSession: {
+          items: [],
+          customerName: '',
+          customerGstin: '',
+          discountPercentage: 0
+        }
       };
     });
 
     setIsModalOpen(false);
-    setCart([]);
-    setCustomerName('');
-    setCustomerGstin('');
-    setDiscountPercentage(0);
     setSelectionQuantities({});
     alert("Order successfully created!");
   };
@@ -192,7 +229,6 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
   const generatePDF = (order: Order) => {
     const doc = new jsPDF();
     
-    // Header - Company Information
     doc.setFontSize(22);
     doc.setTextColor(79, 70, 229); // Indigo-600
     doc.setFont("helvetica", "bold");
@@ -210,7 +246,6 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     doc.setDrawColor(200);
     doc.line(14, 44, 196, 44);
 
-    // Customer & Invoice Details
     doc.setFontSize(12);
     doc.setTextColor(0);
     doc.text("INVOICE TO:", 14, 54);
@@ -225,7 +260,6 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     doc.text(`Invoice No: ${order.invoiceNumber}`, 140, 54);
     doc.text(`Date: ${formatDate(order.date)}`, 140, 60);
 
-    // Items Table
     autoTable(doc, {
       startY: 75,
       head: [['Sl.', 'Product Name', 'Qty', 'Unit Price', 'GST%', 'Total (₹)']],
@@ -238,11 +272,10 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
         item.totalWithGst.toFixed(2)
       ]),
       theme: 'striped',
-      headStyles: { fillStyle: 'f', fillColor: [79, 70, 229] },
+      headStyles: { fillColor: [79, 70, 229] },
       styles: { fontSize: 9 }
     });
 
-    // Summary Totals
     const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.setFontSize(10);
     
@@ -252,7 +285,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     
     if (order.discountAmount > 0) {
       currentY += 7;
-      doc.setTextColor(220, 38, 38); // Red for discount
+      doc.setTextColor(220, 38, 38);
       doc.text(`Discount (${order.discountPercentage}%):`, 140, currentY);
       doc.text(`- INR ${order.discountAmount.toFixed(2)}`, 170, currentY);
       doc.setTextColor(0);
@@ -268,7 +301,6 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     doc.text("Grand Total:", 140, currentY);
     doc.text(`INR ${order.grandTotal.toFixed(2)}`, 170, currentY);
 
-    // Footer
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(150);
@@ -290,18 +322,24 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <button 
-          onClick={() => {
-            setCart([]);
-            setDiscountPercentage(0);
-            setSelectionQuantities({});
-            setIsModalOpen(true);
-          }}
-          className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition-all font-semibold"
-        >
-          <Plus size={20} />
-          <span>New Sale Order</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          {cart.length > 0 && (
+             <button 
+              onClick={resetSession}
+              className="p-2 text-red-500 bg-white border border-gray-200 rounded-lg hover:bg-red-50 shadow-sm transition-colors"
+              title="Clear Cart Session"
+            >
+              <RotateCcw size={20} />
+            </button>
+          )}
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition-all font-semibold"
+          >
+            <Plus size={20} />
+            <span>{cart.length > 0 ? `Continue Sale (${cart.length})` : 'New Sale Order'}</span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -362,38 +400,42 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Create New Sales Order</h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={24} />
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md">
+          {/* Reduced max-width from 6xl to 5xl and height to 80vh for a more compact feel */}
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[95vh] sm:h-[80vh] flex flex-col overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
+              <div className="flex items-center space-x-4">
+                <h2 className="text-lg font-bold text-gray-900">Create New Sales Order</h2>
+                <button 
+                  onClick={resetSession}
+                  className="flex items-center space-x-1 text-[10px] text-red-500 hover:text-red-700 font-bold bg-red-50 px-2 py-1 rounded"
+                >
+                  <RotateCcw size={10} />
+                  <span>RESET FORM</span>
+                </button>
+              </div>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-2">
+                <X size={20} />
               </button>
             </div>
             
-            <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-              <div className="flex-1 p-6 overflow-y-auto border-r border-gray-100 bg-white">
-                <div className="mb-6 relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                  <input 
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50/50 outline-none focus:ring-1 focus:ring-indigo-400" 
-                    placeholder="Search product to add..." 
-                  />
-                </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+              {/* Product Selection Area */}
+              <div className="flex-1 p-4 sm:p-5 overflow-y-auto border-r border-gray-100 bg-white">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {state.products.map(product => (
                     <div 
                       key={product.id} 
-                      className={`p-4 rounded-xl border transition-all ${product.stockQuantity === 0 ? 'bg-gray-50 opacity-60 grayscale' : 'bg-white border-gray-100 shadow-sm hover:border-indigo-300'}`}
+                      className={`p-3 rounded-xl border transition-all ${product.stockQuantity === 0 ? 'bg-gray-50 opacity-60 grayscale' : 'bg-white border-gray-100 shadow-sm hover:border-indigo-300'}`}
                     >
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] font-bold uppercase text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded">{product.category}</span>
-                        <span className={`text-[10px] font-bold ${product.stockQuantity < product.minThreshold ? 'text-amber-600' : 'text-emerald-600'}`}>
-                          In Stock: {product.stockQuantity}
+                      <div className="flex justify-between items-start mb-1.5">
+                        <span className="text-[9px] font-bold uppercase text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded">{product.category}</span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${product.stockQuantity < product.minThreshold ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                          Stock: {product.stockQuantity}
                         </span>
                       </div>
-                      <h4 className="font-bold text-gray-900 mb-1 leading-tight">{product.name}</h4>
-                      <p className="text-indigo-600 font-bold text-sm mb-4">{formatCurrency(product.sellingPrice)}</p>
+                      <h4 className="font-bold text-gray-900 mb-0.5 leading-tight text-sm truncate">{product.name}</h4>
+                      <p className="text-indigo-600 font-bold text-xs mb-3">{formatCurrency(product.sellingPrice)}</p>
                       
                       <div className="flex items-center space-x-2">
                         <div className="flex-1 relative">
@@ -401,7 +443,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                             type="number"
                             placeholder="Qty"
                             min="1"
-                            className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-indigo-500 outline-none bg-gray-50/50"
+                            className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 outline-none bg-gray-50/50 font-bold"
                             value={selectionQuantities[product.id] || ''}
                             onChange={(e) => setSelectionQuantities(prev => ({ ...prev, [product.id]: e.target.value }))}
                             onKeyPress={(e) => e.key === 'Enter' && handleAddToCart(product.id)}
@@ -411,7 +453,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                         <button 
                           onClick={() => handleAddToCart(product.id)}
                           disabled={product.stockQuantity === 0}
-                          className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300 text-xs font-bold transition-all flex items-center space-x-1"
+                          className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300 text-xs font-bold transition-all flex items-center space-x-1 active:scale-95"
                         >
                           <Plus size={14} />
                           <span>Add</span>
@@ -422,62 +464,65 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                 </div>
               </div>
 
-              <div className="w-full md:w-96 bg-gray-50 p-6 overflow-y-auto flex flex-col border-l border-gray-100">
-                <div className="space-y-4 mb-6">
+              {/* Cart Summary Sidebar - Narrowed from 450px to 380px */}
+              <div className="w-full lg:w-[380px] bg-gray-50 p-4 sm:p-5 overflow-y-auto flex flex-col border-t lg:border-t-0 lg:border-l border-gray-100 shadow-inner">
+                <div className="space-y-3 mb-5">
                   <div>
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Customer Name</label>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Customer Name</label>
                     <input 
                       required 
-                      className="w-full px-4 py-2 mt-1 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-1 focus:ring-indigo-400" 
-                      placeholder="Enter customer name" 
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-400 font-medium" 
+                      placeholder="Enter full name" 
                       value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
+                      onChange={(e) => updateSessionField('customerName', e.target.value)}
                     />
                   </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">GSTIN (Optional)</label>
-                    <input 
-                      className="w-full px-4 py-2 mt-1 border border-gray-200 rounded-lg text-sm bg-white font-mono outline-none focus:ring-1 focus:ring-indigo-400" 
-                      placeholder="22AAAAA0000A1Z5" 
-                      value={customerGstin}
-                      onChange={(e) => setCustomerGstin(e.target.value.toUpperCase())}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Discount (%)</label>
-                    <div className="relative mt-1">
-                      <Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">GSTIN</label>
                       <input 
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-1 focus:ring-indigo-400" 
-                        placeholder="0.0" 
-                        value={discountPercentage || ''}
-                        onChange={(e) => setDiscountPercentage(parseFloat(e.target.value) || 0)}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white font-mono outline-none focus:ring-2 focus:ring-indigo-400" 
+                        placeholder="Optional" 
+                        value={customerGstin}
+                        onChange={(e) => updateSessionField('customerGstin', e.target.value.toUpperCase())}
                       />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Disc (%)</label>
+                      <div className="relative">
+                        <Percent className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                        <input 
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          className="w-full pl-7 pr-2 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-400 font-bold" 
+                          placeholder="0.0" 
+                          value={discountPercentage || ''}
+                          onChange={(e) => updateSessionField('discountPercentage', parseFloat(e.target.value) || 0)}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between mb-4 border-b border-gray-200 pb-2">
-                  <h3 className="text-sm font-bold text-gray-800 flex items-center">
-                    <ShoppingCart size={16} className="mr-2 text-indigo-600" /> Current Cart
+                <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
+                  <h3 className="text-sm font-bold text-gray-900 flex items-center">
+                    <ShoppingCart size={16} className="mr-2 text-indigo-600" /> Bill Summary
                   </h3>
-                  <span className="text-[10px] font-bold bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">{cart.length}</span>
+                  <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{cart.length} Items</span>
                 </div>
 
-                <div className="flex-1 space-y-3 overflow-y-auto mb-6 pr-1">
+                <div className="flex-1 space-y-3 overflow-y-auto mb-4 pr-1 min-h-[150px] lg:min-h-0">
                   {cartItems.length > 0 ? cartItems.map((item, idx) => (
-                    <div key={idx} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 group">
+                    <div key={idx} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 group transition-all hover:shadow-md">
                       <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs font-bold truncate pr-2 flex-1 text-gray-900">{item.name}</p>
+                        <p className="text-xs font-bold text-gray-900 truncate pr-2 flex-1">{item.name}</p>
                         <button 
                           onClick={() => removeFromCart(item.productId)}
-                          className="text-gray-300 hover:text-red-500 transition-colors"
+                          className="text-gray-400 hover:text-red-500 p-1 transition-colors rounded hover:bg-red-50"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={16} />
                         </button>
                       </div>
                       <div className="flex items-center justify-between">
@@ -485,52 +530,52 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                           <input 
                             type="number"
                             min="0"
-                            className="w-16 px-2 py-1 border border-gray-200 rounded bg-gray-50 text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-300"
+                            className="w-14 px-1.5 py-1 border border-gray-200 rounded-lg bg-gray-50 text-xs font-bold text-center outline-none focus:ring-2 focus:ring-indigo-300"
                             value={item.quantity || ''}
                             onChange={(e) => updateCartQuantity(item.productId, e.target.value)}
                           />
-                          <span className="text-[10px] text-gray-400">@ {formatCurrency(item.price)}</span>
+                          <span className="text-[10px] font-medium text-gray-400">× {formatCurrency(item.price)}</span>
                         </div>
                         <p className="text-xs font-bold text-gray-900">{formatCurrency(item.total)}</p>
                       </div>
                     </div>
                   )) : (
-                    <div className="text-center py-12">
+                    <div className="text-center py-10 bg-white rounded-2xl border-2 border-dashed border-gray-200">
                       <ShoppingCart size={32} className="mx-auto mb-2 text-gray-200" />
-                      <p className="text-gray-400 text-xs italic">Your cart is empty</p>
+                      <p className="text-gray-400 text-[10px] font-medium italic">Empty Cart</p>
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-2 border-t border-gray-200 pt-4 bg-gray-50">
+                <div className="space-y-2 border-t border-gray-200 pt-3 bg-gray-50 sticky bottom-0">
                   <div className="flex justify-between text-xs">
-                    <span className="text-gray-500">Subtotal</span>
-                    <span className="font-semibold text-gray-800">{formatCurrency(totals.amount)}</span>
+                    <span className="text-gray-500 font-medium">Subtotal</span>
+                    <span className="font-bold text-gray-800">{formatCurrency(totals.amount)}</span>
                   </div>
                   {totals.discountAmount > 0 && (
                     <div className="flex justify-between text-xs">
-                      <span className="text-red-500 font-medium">Discount ({discountPercentage}%)</span>
-                      <span className="font-semibold text-red-600">-{formatCurrency(totals.discountAmount)}</span>
+                      <span className="text-red-500 font-bold">Discount ({discountPercentage}%)</span>
+                      <span className="font-bold text-red-600">-{formatCurrency(totals.discountAmount)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-xs">
-                    <span className="text-gray-500">GST Total</span>
-                    <span className="font-semibold text-indigo-600">{formatCurrency(totals.gst)}</span>
+                    <span className="text-gray-500 font-medium">GST</span>
+                    <span className="font-bold text-indigo-600">{formatCurrency(totals.gst)}</span>
                   </div>
-                  <div className="flex justify-between text-lg font-bold border-t border-dashed border-gray-300 pt-3 mt-2">
-                    <span className="text-gray-900">Total Payable</span>
-                    <span className="text-indigo-700">{formatCurrency(totals.grandTotal)}</span>
+                  <div className="flex justify-between items-center py-2 border-t border-dashed border-gray-300 mt-1">
+                    <span className="text-sm font-bold text-gray-900">Total</span>
+                    <span className="text-lg font-black text-indigo-700 tracking-tight">{formatCurrency(totals.grandTotal)}</span>
                   </div>
+                  
+                  <button 
+                    onClick={handleCreateOrder}
+                    disabled={cart.length === 0 || !customerName}
+                    className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-indigo-100 hover:bg-indigo-700 active:scale-[0.98] disabled:bg-gray-300 disabled:shadow-none transition-all flex items-center justify-center space-x-2"
+                  >
+                    <CreditCard size={18} />
+                    <span>Generate Invoice</span>
+                  </button>
                 </div>
-
-                <button 
-                  onClick={handleCreateOrder}
-                  disabled={cart.length === 0 || !customerName}
-                  className="w-full mt-6 bg-indigo-600 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 disabled:bg-gray-300 disabled:shadow-none disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
-                >
-                  <CreditCard size={18} />
-                  <span>Generate Order & PDF</span>
-                </button>
               </div>
             </div>
           </div>

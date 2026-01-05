@@ -19,7 +19,7 @@ import Products from './pages/Products';
 import Vendors from './pages/Vendors';
 import Requests from './pages/Requests';
 import Orders from './pages/Orders';
-import { AppState, Role } from './types';
+import { AppState } from './types';
 
 const STORAGE_KEY = 'craftline_inventory_data';
 
@@ -28,6 +28,12 @@ const INITIAL_STATE: AppState = {
   vendors: [],
   requests: [],
   orders: [],
+  cartSession: {
+    items: [],
+    customerName: '',
+    customerGstin: '',
+    discountPercentage: 0
+  }
 };
 
 const NavLink: React.FC<{ to: string; icon: React.ReactNode; label: string }> = ({ to, icon, label }) => {
@@ -160,7 +166,14 @@ const AppLayout: React.FC<AppLayoutProps> = ({ state, updateState, isSidebarOpen
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : INITIAL_STATE;
+    if (!saved) return INITIAL_STATE;
+    const parsed = JSON.parse(saved);
+    // Ensure cartSession exists in migrated state
+    return {
+      ...INITIAL_STATE,
+      ...parsed,
+      cartSession: parsed.cartSession || INITIAL_STATE.cartSession
+    };
   });
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);

@@ -63,9 +63,17 @@ export interface Order {
   grandTotal: number;
 }
 
+export interface CartSession {
+  items: { productId: string; quantity: number }[];
+  customerName: string;
+  customerGstin: string;
+  discountPercentage: number;
+}
+
 export interface AppState {
   products: Product[];
   vendors: Vendor[];
   requests: VendorRequest[];
   orders: Order[];
+  cartSession: CartSession;
 }
