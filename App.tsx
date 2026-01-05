@@ -31,6 +31,8 @@ const INITIAL_STATE: AppState = {
   cartSession: {
     items: [],
     customerName: '',
+    customerPhone: '',
+    customerAddress: '',
     customerGstin: '',
     discountPercentage: 0
   }
@@ -172,7 +174,10 @@ const App: React.FC = () => {
     return {
       ...INITIAL_STATE,
       ...parsed,
-      cartSession: parsed.cartSession || INITIAL_STATE.cartSession
+      cartSession: {
+        ...INITIAL_STATE.cartSession,
+        ...(parsed.cartSession || {})
+      }
     };
   });
 

@@ -16,6 +16,12 @@ import autoTable from 'jspdf-autotable';
 import { AppState, Order, OrderItem } from '../types';
 import { formatCurrency, formatDate, generateId } from '../utils/format';
 
+/** 
+ * IMPORTANT: Replace this placeholder with the Base64 string of the Fresh Fold logo.
+ * You can convert your image to Base64 using online tools like "base64-image.de" 
+ */
+const LOGO_BASE64 = ''; 
+
 interface OrdersProps {
   state: AppState;
   updateState: (updater: (prev: AppState) => AppState) => void;
@@ -25,10 +31,15 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   
-  // Destructure cart session from global state
-  const { items: cart, customerName, customerGstin, discountPercentage } = state.cartSession;
+  const { 
+    items: cart, 
+    customerName, 
+    customerPhone,
+    customerAddress,
+    customerGstin, 
+    discountPercentage 
+  } = state.cartSession;
 
-  // Local UI state for typed quantities in the product list
   const [selectionQuantities, setSelectionQuantities] = useState<Record<string, string>>({});
 
   const filteredOrders = state.orders.filter(o => 
@@ -110,7 +121,6 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       };
     });
 
-    // Reset quantity field for this product
     setSelectionQuantities(prev => ({ ...prev, [productId]: '' }));
   };
 
@@ -159,6 +169,8 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
         cartSession: {
           items: [],
           customerName: '',
+          customerPhone: '',
+          customerAddress: '',
           customerGstin: '',
           discountPercentage: 0
         }
@@ -190,6 +202,8 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
       date: new Date().toISOString(),
       customerId: generateId('CUS'),
       customerName,
+      customerPhone,
+      customerAddress,
       customerGstin,
       items: orderItems,
       totalAmount: totals.amount,
@@ -215,6 +229,8 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
         cartSession: {
           items: [],
           customerName: '',
+          customerPhone: '',
+          customerAddress: '',
           customerGstin: '',
           discountPercentage: 0
         }
@@ -228,41 +244,90 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
 
   const generatePDF = (order: Order) => {
     const doc = new jsPDF();
-    
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 14;
+
+    // Company Header (Left Side)
     doc.setFontSize(22);
     doc.setTextColor(79, 70, 229); // Indigo-600
     doc.setFont("helvetica", "bold");
-    doc.text("CRAFTLINE PRODUCTION", 14, 20);
+    doc.text("CRAFTLINE PRODUCTION", margin, 20);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.setFont("helvetica", "italic");
-    doc.text("Manufacturer of Fresh Fold Tissue", 14, 27);
+    doc.text("Manufacturer of Fresh Fold Tissue", margin, 27);
     
     doc.setFont("helvetica", "normal");
-    doc.text("Contact: 9477110150", 14, 33);
-    doc.text("Email: craftlineproduction25@gmail.com", 14, 38);
+    doc.text("Contact: +91 9477110150", margin, 33);
+    doc.text("Email: craftlineproduction25@gmail.com", margin, 38);
+
+    // Add Logo (Top Right Side)
+    if (LOGO_BASE64) {
+      try {
+        const logoSize = 35;
+        // Positioned at the top right margin
+        doc.addImage(LOGO_BASE64, 'PNG', pageWidth - margin - logoSize, 8, logoSize, logoSize);
+      } catch (e) {
+        console.error("Error adding logo to PDF", e);
+      }
+    }
+
+    // Invoice Meta
+    doc.setTextColor(0);
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Invoice No: ${order.invoiceNumber}`, 140, 33);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Date: ${formatDate(order.date)}`, 140, 38);
 
     doc.setDrawColor(200);
-    doc.line(14, 44, 196, 44);
+    doc.line(margin, 44, pageWidth - margin, 44);
 
+    // Bill To Section
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(79, 70, 229);
+    doc.text("BILL TO:", margin, 52);
+    
     doc.setFontSize(12);
     doc.setTextColor(0);
-    doc.text("INVOICE TO:", 14, 54);
-    doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text(order.customerName, 14, 61);
+    doc.text(order.customerName.toUpperCase(), margin, 59);
+    
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    if (order.customerGstin) doc.text(`GSTIN: ${order.customerGstin}`, 14, 67);
+    doc.setFontSize(9);
+    let currentYHeader = 65;
+    
+    if (order.customerPhone) {
+      doc.setFont("helvetica", "bold");
+      doc.text("Phone: ", margin, currentYHeader);
+      doc.setFont("helvetica", "normal");
+      doc.text(order.customerPhone, margin + 14, currentYHeader);
+      currentYHeader += 5;
+    }
+    
+    if (order.customerAddress) {
+      doc.setFont("helvetica", "bold");
+      doc.text("Address: ", margin, currentYHeader);
+      doc.setFont("helvetica", "normal");
+      const splitAddress = doc.splitTextToSize(order.customerAddress, 80);
+      doc.text(splitAddress, margin + 14, currentYHeader);
+      currentYHeader += (splitAddress.length * 4.5);
+    }
+    
+    if (order.customerGstin) {
+      doc.setFont("helvetica", "bold");
+      doc.text("GSTIN: ", margin, currentYHeader);
+      doc.setFont("helvetica", "normal");
+      doc.text(order.customerGstin, margin + 14, currentYHeader);
+      currentYHeader += 5;
+    }
 
-    doc.setFontSize(11);
-    doc.text(`Invoice No: ${order.invoiceNumber}`, 140, 54);
-    doc.text(`Date: ${formatDate(order.date)}`, 140, 60);
-
+    // Product Table
     autoTable(doc, {
-      startY: 75,
-      head: [['Sl.', 'Product Name', 'Qty', 'Unit Price', 'GST%', 'Total (₹)']],
+      startY: Math.max(75, currentYHeader + 5),
+      head: [['Sl.', 'Product Description', 'Qty', 'Unit Price', 'GST %', 'Total (INR)']],
       body: order.items.map((item, i) => [
         i + 1,
         item.productName,
@@ -271,40 +336,89 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
         item.gstPercentage + '%',
         item.totalWithGst.toFixed(2)
       ]),
-      theme: 'striped',
-      headStyles: { fillColor: [79, 70, 229] },
-      styles: { fontSize: 9 }
+      theme: 'grid',
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
+      styles: { fontSize: 9, cellPadding: 3 },
+      columnStyles: {
+        0: { cellWidth: 10 },
+        2: { halign: 'center' },
+        3: { halign: 'right' },
+        4: { halign: 'center' },
+        5: { halign: 'right' }
+      },
+      margin: { left: margin, right: margin }
     });
 
     const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFontSize(10);
     
-    let currentY = finalY;
-    doc.text("Subtotal:", 140, currentY);
-    doc.text(`INR ${order.totalAmount.toFixed(2)}`, 170, currentY);
+    // Summary Section Positioning
+    const rightMarginX = pageWidth - margin;
+    const summaryLabelX = 135;
+    let currentYSummary = finalY;
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    
+    doc.text("Subtotal:", summaryLabelX, currentYSummary);
+    doc.text(order.totalAmount.toFixed(2), rightMarginX, currentYSummary, { align: 'right' });
     
     if (order.discountAmount > 0) {
-      currentY += 7;
+      currentYSummary += 7;
       doc.setTextColor(220, 38, 38);
-      doc.text(`Discount (${order.discountPercentage}%):`, 140, currentY);
-      doc.text(`- INR ${order.discountAmount.toFixed(2)}`, 170, currentY);
+      doc.text(`Discount (${order.discountPercentage}%):`, summaryLabelX, currentYSummary);
+      doc.text(`- ${order.discountAmount.toFixed(2)}`, rightMarginX, currentYSummary, { align: 'right' });
       doc.setTextColor(0);
     }
 
-    currentY += 7;
-    doc.text("Total GST:", 140, currentY);
-    doc.text(`INR ${order.totalGst.toFixed(2)}`, 170, currentY);
+    currentYSummary += 7;
+    doc.text("Total GST Amount:", summaryLabelX, currentYSummary);
+    doc.text(order.totalGst.toFixed(2), rightMarginX, currentYSummary, { align: 'right' });
 
-    currentY += 9;
+    currentYSummary += 10;
+    doc.setDrawColor(200);
+    doc.line(summaryLabelX, currentYSummary - 6, rightMarginX, currentYSummary - 6);
+    
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    doc.text("Grand Total:", 140, currentY);
-    doc.text(`INR ${order.grandTotal.toFixed(2)}`, 170, currentY);
+    doc.text("Grand Total:", summaryLabelX, currentYSummary);
+    doc.text(`INR ${order.grandTotal.toFixed(2)}`, rightMarginX, currentYSummary, { align: 'right' });
+
+    // Terms and Conditions Section
+    const footerY = 255;
+    const termsY = Math.max(footerY - 65, currentYSummary + 15);
+    
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0);
+    doc.text("Terms and conditions:", margin, termsY);
+    
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(50);
+    doc.text("1. Product once sold will not be taken back.", margin, termsY + 6);
+    doc.text("2. Payment should be made within time.", margin, termsY + 11);
+    doc.text("3. Avail special discount with bulk order.", margin, termsY + 16);
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(79, 70, 229);
+    doc.text("Thank you for making business with us.", margin, termsY + 25);
+
+    // Signatures
+    doc.setDrawColor(180);
+    doc.line(margin, footerY, 74, footerY);
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "bold");
+    doc.text("Receiver's Signature", margin, footerY + 5);
+
+    doc.line(136, footerY, pageWidth - margin, footerY);
+    doc.text("For CRAFTLINE PRODUCTION", 136, footerY - 15);
+    doc.text("Authorized Signatory & Stamp", 136, footerY + 5);
 
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(150);
-    doc.text("Thank you for choosing Craftline Production! This is a computer generated invoice.", 14, 280);
+    doc.text("Computer Generated Invoice - Valid without manual signature if stamped by the firm.", margin, 285, { align: 'left' });
 
     doc.save(`${order.invoiceNumber}.pdf`);
   };
@@ -361,7 +475,8 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                   <td className="px-6 py-4 font-bold text-indigo-600">{order.invoiceNumber}</td>
                   <td className="px-6 py-4">
                     <p className="font-semibold text-gray-900">{order.customerName}</p>
-                    {order.customerGstin && <p className="text-[10px] font-mono text-gray-500">{order.customerGstin}</p>}
+                    {order.customerPhone && <p className="text-[10px] text-gray-500">{order.customerPhone}</p>}
+                    {order.customerGstin && <p className="text-[10px] font-mono text-gray-400">{order.customerGstin}</p>}
                   </td>
                   <td className="px-6 py-4 text-gray-600">
                     {order.items.length} product(s)
@@ -401,8 +516,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-md">
-          {/* Reduced max-width from 6xl to 5xl and height to 80vh for a more compact feel */}
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[95vh] sm:h-[80vh] flex flex-col overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[95vh] sm:h-[85vh] flex flex-col overflow-hidden">
             <div className="p-4 sm:p-5 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
               <div className="flex items-center space-x-4">
                 <h2 className="text-lg font-bold text-gray-900">Create New Sales Order</h2>
@@ -420,7 +534,6 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
             </div>
             
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-              {/* Product Selection Area */}
               <div className="flex-1 p-4 sm:p-5 overflow-y-auto border-r border-gray-100 bg-white">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {state.products.map(product => (
@@ -464,51 +577,72 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                 </div>
               </div>
 
-              {/* Cart Summary Sidebar - Narrowed from 450px to 380px */}
-              <div className="w-full lg:w-[380px] bg-gray-50 p-4 sm:p-5 overflow-y-auto flex flex-col border-t lg:border-t-0 lg:border-l border-gray-100 shadow-inner">
-                <div className="space-y-3 mb-5">
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Customer Name</label>
-                    <input 
-                      required 
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-400 font-medium" 
-                      placeholder="Enter full name" 
-                      value={customerName}
-                      onChange={(e) => updateSessionField('customerName', e.target.value)}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
+              <div className="w-full lg:w-[400px] bg-gray-50 p-4 sm:p-5 overflow-y-auto flex flex-col border-t lg:border-t-0 lg:border-l border-gray-100 shadow-inner">
+                <div className="space-y-4 mb-6">
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
+                    <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-widest border-b border-indigo-50 pb-1 mb-2">Customer Details</h3>
                     <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">GSTIN</label>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Full Name *</label>
                       <input 
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white font-mono outline-none focus:ring-2 focus:ring-indigo-400" 
-                        placeholder="Optional" 
-                        value={customerGstin}
-                        onChange={(e) => updateSessionField('customerGstin', e.target.value.toUpperCase())}
+                        required 
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50/50 outline-none focus:ring-2 focus:ring-indigo-400 font-medium" 
+                        placeholder="e.g. Rahul Sharma" 
+                        value={customerName}
+                        onChange={(e) => updateSessionField('customerName', e.target.value)}
                       />
                     </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Disc (%)</label>
-                      <div className="relative">
-                        <Percent className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Phone</label>
                         <input 
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.1"
-                          className="w-full pl-7 pr-2 py-2 border border-gray-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-400 font-bold" 
-                          placeholder="0.0" 
-                          value={discountPercentage || ''}
-                          onChange={(e) => updateSessionField('discountPercentage', parseFloat(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50/50 outline-none focus:ring-2 focus:ring-indigo-400" 
+                          placeholder="9876543210" 
+                          value={customerPhone}
+                          onChange={(e) => updateSessionField('customerPhone', e.target.value)}
                         />
                       </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">GSTIN</label>
+                        <input 
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50/50 font-mono outline-none focus:ring-2 focus:ring-indigo-400" 
+                          placeholder="Optional" 
+                          value={customerGstin}
+                          onChange={(e) => updateSessionField('customerGstin', e.target.value.toUpperCase())}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Address</label>
+                      <textarea 
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50/50 outline-none focus:ring-2 focus:ring-indigo-400 resize-none h-16" 
+                        placeholder="Billing/Delivery address" 
+                        value={customerAddress}
+                        onChange={(e) => updateSessionField('customerAddress', e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Special Discount (%)</label>
+                    <div className="relative">
+                      <Percent className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                      <input 
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        className="w-full pl-7 pr-2 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50/50 outline-none focus:ring-2 focus:ring-indigo-400 font-bold" 
+                        placeholder="0.0" 
+                        value={discountPercentage || ''}
+                        onChange={(e) => updateSessionField('discountPercentage', parseFloat(e.target.value) || 0)}
+                      />
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between mb-3 border-b border-gray-200 pb-2">
                   <h3 className="text-sm font-bold text-gray-900 flex items-center">
-                    <ShoppingCart size={16} className="mr-2 text-indigo-600" /> Bill Summary
+                    <ShoppingCart size={16} className="mr-2 text-indigo-600" /> Current Cart
                   </h3>
                   <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{cart.length} Items</span>
                 </div>
@@ -563,7 +697,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                     <span className="font-bold text-indigo-600">{formatCurrency(totals.gst)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-t border-dashed border-gray-300 mt-1">
-                    <span className="text-sm font-bold text-gray-900">Total</span>
+                    <span className="text-sm font-bold text-gray-900">Total Payable</span>
                     <span className="text-lg font-black text-indigo-700 tracking-tight">{formatCurrency(totals.grandTotal)}</span>
                   </div>
                   
@@ -573,7 +707,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                     className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg shadow-indigo-100 hover:bg-indigo-700 active:scale-[0.98] disabled:bg-gray-300 disabled:shadow-none transition-all flex items-center justify-center space-x-2"
                   >
                     <CreditCard size={18} />
-                    <span>Generate Invoice</span>
+                    <span>Complete Sale & Print</span>
                   </button>
                 </div>
               </div>

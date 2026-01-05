@@ -54,6 +54,8 @@ export interface Order {
   date: string;
   customerId: string;
   customerName: string;
+  customerPhone?: string;
+  customerAddress?: string;
   customerGstin?: string;
   items: OrderItem[];
   totalAmount: number;
@@ -66,6 +68,8 @@ export interface Order {
 export interface CartSession {
   items: { productId: string; quantity: number }[];
   customerName: string;
+  customerPhone: string;
+  customerAddress: string;
   customerGstin: string;
   discountPercentage: number;
 }
