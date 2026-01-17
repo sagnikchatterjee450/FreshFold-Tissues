@@ -561,6 +561,34 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     const footerY = 255;
     const termsY = Math.max(footerY - 65, currentYSummary + 15);
     
+    // Add Payment QR Code
+    try {
+      const qrCodeSize = 30;
+      const qrCodeX = pageWidth - margin - qrCodeSize - 30;
+      const qrCodeY = termsY - 40;
+      
+      try {
+        const res = await fetch('/qrcode-freshfold.jpeg');
+        if (res.ok) {
+          const blob = await res.blob();
+          const dataUrl = await dataUrlFromBlob(blob);
+          if (typeof dataUrl === 'string') {
+            doc.addImage(dataUrl, 'JPEG', qrCodeX, qrCodeY, qrCodeSize, qrCodeSize);
+            
+            // Add QR label below
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(79, 70, 229);
+            doc.text("Scan for Payment", qrCodeX, qrCodeY + qrCodeSize + 3);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch QR code image', e);
+      }
+    } catch (e) {
+      console.warn('Failed to add QR code to PDF', e);
+    }
+    
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(0);
