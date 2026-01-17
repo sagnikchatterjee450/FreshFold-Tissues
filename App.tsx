@@ -19,6 +19,7 @@ import Products from './pages/Products';
 import Vendors from './pages/Vendors';
 import Requests from './pages/Requests';
 import Orders from './pages/Orders';
+import Login from './pages/Login';
 import { AppState } from './types';
 
 const STORAGE_KEY = 'craftline_inventory_data';
@@ -74,9 +75,10 @@ interface AppLayoutProps {
   updateState: (updater: (prev: AppState) => AppState) => void;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
+  onLogout: () => void;
 }
 
-const AppLayout: React.FC<AppLayoutProps> = ({ state, updateState, isSidebarOpen, setIsSidebarOpen }) => {
+const AppLayout: React.FC<AppLayoutProps> = ({ state, updateState, isSidebarOpen, setIsSidebarOpen, onLogout }) => {
   const routeTitle = useRouteTitle();
 
   return (
@@ -143,7 +145,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ state, updateState, isSidebarOpen
             <div className="h-8 w-px bg-gray-200 mx-2"></div>
             <button 
               className="flex items-center space-x-2 text-sm text-gray-700 font-medium hover:text-indigo-600 transition-colors"
-              onClick={() => alert('Logout clicked')}
+              onClick={() => onLogout()}
             >
               <LogOut size={18} />
               <span className="hidden sm:inline">Logout</span>
@@ -182,6 +184,7 @@ const App: React.FC = () => {
   });
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('craftline_auth'));
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -190,15 +193,24 @@ const App: React.FC = () => {
   const updateState = (updater: (prev: AppState) => AppState) => {
     setState(prev => updater(prev));
   };
-
   return (
     <HashRouter>
-      <AppLayout 
-        state={state} 
-        updateState={updateState} 
-        isSidebarOpen={isSidebarOpen} 
-        setIsSidebarOpen={setIsSidebarOpen} 
-      />
+      {isAuthenticated ? (
+        <AppLayout 
+          state={state} 
+          updateState={updateState} 
+          isSidebarOpen={isSidebarOpen} 
+          setIsSidebarOpen={setIsSidebarOpen}
+          onLogout={() => {
+            localStorage.removeItem('craftline_auth');
+            setIsAuthenticated(false);
+          }}
+        />
+      ) : (
+        <Routes>
+          <Route path="*" element={<Login onLogin={() => setIsAuthenticated(true)} />} />
+        </Routes>
+      )}
     </HashRouter>
   );
 };

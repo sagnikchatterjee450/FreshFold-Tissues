@@ -16,11 +16,96 @@ import autoTable from 'jspdf-autotable';
 import { AppState, Order, OrderItem } from '../types';
 import { formatCurrency, formatDate, generateId } from '../utils/format';
 
-/** 
- * IMPORTANT: Replace this placeholder with the Base64 string of the Fresh Fold logo.
- * You can convert your image to Base64 using online tools like "base64-image.de" 
+/**
+ * Logo handling:
+ * - If you prefer embedding the image directly, set `LOGO_BASE64` to a data URL string (data:image/png;base64,...).
+ * - Otherwise place the provided image file at `/freshfold-logo.png` (project `public` folder) and it will be fetched at runtime.
  */
-const LOGO_BASE64 = ''; 
+const LOGO_BASE64 = '';
+
+const dataUrlFromBlob = (blob: Blob) => new Promise<string | ArrayBuffer | null>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('Failed to read blob as data URL'));
+  reader.onload = () => resolve(reader.result);
+  reader.readAsDataURL(blob);
+});
+
+// Create a watermark image data URL by drawing the logo onto an offscreen canvas with low opacity
+const createWatermarkDataUrl = async (src: string, maxWidth: number) => {
+  return new Promise<string>((resolve, reject) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxWidth / img.width);
+          const w = img.width * scale;
+          const h = img.height * scale;
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return reject(new Error('Canvas context unavailable'));
+          ctx.clearRect(0, 0, w, h);
+          ctx.globalAlpha = 0.08;
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/png'));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = (e) => reject(new Error('Failed to load watermark image'));
+      img.src = src;
+    } catch (e) {
+      reject(e);
+    }
+  });
+};
+
+// Convert number to words (Indian style) for amounts like 1234567.89
+const numberToWords = (amount: number) => {
+  const units: string[] = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+  const teens: string[] = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens: string[] = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  const inWords = (num: number) => {
+    if (num === 0) return '';
+    if (num < 10) return units[num];
+    if (num < 20) return teens[num - 10];
+    if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + units[num % 10] : '');
+    if (num < 1000) return units[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + inWords(num % 100) : '');
+    return '';
+  };
+
+  const numberToIndian = (num: number) => {
+    let result = '';
+    const crore = Math.floor(num / 10000000);
+    num = num % 10000000;
+    const lakh = Math.floor(num / 100000);
+    num = num % 100000;
+    const thousand = Math.floor(num / 1000);
+    num = num % 1000;
+    const hundredPlus = num; // up to 999
+
+    if (crore) result += inWords(crore) + ' Crore';
+    if (lakh) result += (result ? ' ' : '') + inWords(lakh) + ' Lakh';
+    if (thousand) result += (result ? ' ' : '') + inWords(thousand) + ' Thousand';
+    if (hundredPlus) result += (result ? ' ' : '') + inWords(hundredPlus);
+
+    return result || 'Zero';
+  };
+
+  const rupees = Math.floor(amount);
+  const paise = Math.round((Math.abs(amount - rupees) + 1e-9) * 100);
+
+  const rupeesWords = numberToIndian(rupees);
+  const paiseWords = paise ? (numberToIndian(paise) + ' Paise') : '';
+
+  let final = `Rupees ${rupeesWords}`;
+  if (paise) final += ` and ${paiseWords}`;
+  final += ' Only';
+  return final;
+};
 
 interface OrdersProps {
   state: AppState;
@@ -30,6 +115,7 @@ interface OrdersProps {
 const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedVendorId, setSelectedVendorId] = useState<string>('');
   
   const { 
     items: cart, 
@@ -242,10 +328,62 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     alert("Order successfully created!");
   };
 
-  const generatePDF = (order: Order) => {
+  const generatePDF = async (order: Order) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 14;
+
+    // Draw a page border around the printable area
+    try {
+      const borderOffset = Math.max(8, margin / 2);
+      doc.setDrawColor(200);
+      doc.setLineWidth(0.7);
+      doc.rect(borderOffset, borderOffset, pageWidth - borderOffset * 2, pageHeight - borderOffset * 2, 'S');
+    } catch (e) {
+      console.warn('Failed to draw page border', e);
+    }
+
+    // Watermark: attempt to use embedded base64 first, otherwise fetch the public logo,
+    // draw it on an offscreen canvas with low opacity and embed centered on the page.
+    try {
+      let watermarkSrc: string | null = null;
+      if (LOGO_BASE64) {
+        watermarkSrc = LOGO_BASE64 as string;
+      } else {
+        try {
+          const res = await fetch('/freshfold-logo.png');
+          if (res.ok) {
+            const blob = await res.blob();
+            const dataUrl = await dataUrlFromBlob(blob);
+            if (typeof dataUrl === 'string') watermarkSrc = dataUrl;
+          }
+        } catch (e) {
+          console.warn('Could not fetch logo for watermark', e);
+        }
+      }
+
+      if (watermarkSrc) {
+        const maxW = pageWidth * 0.45; // smaller watermark width for a presentable look
+        const wmDataUrl = await createWatermarkDataUrl(watermarkSrc, maxW);
+        if (wmDataUrl) {
+          // center watermark
+          const tmpImg = new Image();
+          await new Promise<void>((res, rej) => {
+            tmpImg.onload = () => res();
+            tmpImg.onerror = () => rej(new Error('watermark load failed'));
+            tmpImg.src = wmDataUrl;
+          });
+          const wmW = tmpImg.width;
+          const wmH = tmpImg.height;
+          const x = (pageWidth - wmW) / 2;
+          const y = (pageHeight - wmH) / 2;
+          doc.addImage(wmDataUrl, 'PNG', x, y, wmW, wmH);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to draw watermark', e);
+    }
 
     // Company Header (Left Side)
     doc.setFontSize(22);
@@ -263,41 +401,61 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     doc.text("Email: craftlineproduction25@gmail.com", margin, 38);
 
     // Add Logo (Top Right Side)
-    if (LOGO_BASE64) {
-      try {
-        const logoSize = 35;
-        // Positioned at the top right margin
-        doc.addImage(LOGO_BASE64, 'PNG', pageWidth - margin - logoSize, 8, logoSize, logoSize);
-      } catch (e) {
-        console.error("Error adding logo to PDF", e);
+    let logoDrawn = false;
+    const logoSize = 35;
+    const logoX = pageWidth - margin - logoSize;
+    const logoY = 8;
+
+    try {
+      if (LOGO_BASE64) {
+        doc.addImage(LOGO_BASE64, 'PNG', logoX, logoY, logoSize, logoSize);
+        logoDrawn = true;
+      } else {
+        try {
+          const res = await fetch('/freshfold-logo.png');
+          if (res.ok) {
+            const blob = await res.blob();
+            const dataUrl = await dataUrlFromBlob(blob);
+            if (typeof dataUrl === 'string') {
+              doc.addImage(dataUrl, 'PNG', logoX, logoY, logoSize, logoSize);
+              logoDrawn = true;
+            }
+          }
+        } catch (e) {
+          console.warn('Could not fetch logo from /freshfold-logo.png', e);
+        }
       }
+    } catch (e) {
+      console.error('Error adding logo to PDF', e);
     }
 
-    // Invoice Meta
+    // Invoice Meta - position below logo if present
+    const invoiceMetaStartY = logoDrawn ? (logoY + logoSize + 4) : 33;
     doc.setTextColor(0);
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
-    doc.text(`Invoice No: ${order.invoiceNumber}`, 140, 33);
+    doc.text(`Invoice No: ${order.invoiceNumber}`, 140, invoiceMetaStartY);
     doc.setFont("helvetica", "normal");
-    doc.text(`Date: ${formatDate(order.date)}`, 140, 38);
+    doc.text(`Date: ${formatDate(order.date)}`, 140, invoiceMetaStartY + 5);
 
     doc.setDrawColor(200);
-    doc.line(margin, 44, pageWidth - margin, 44);
+    doc.line(margin, invoiceMetaStartY + 11, pageWidth - margin, invoiceMetaStartY + 11);
 
     // Bill To Section
+    const billToStartY = invoiceMetaStartY + 19;
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(79, 70, 229);
-    doc.text("BILL TO:", margin, 52);
-    
+    doc.text("BILL TO:", margin, billToStartY);
+
     doc.setFontSize(12);
     doc.setTextColor(0);
     doc.setFont("helvetica", "bold");
-    doc.text(order.customerName.toUpperCase(), margin, 59);
-    
+    doc.text(order.customerName.toUpperCase(), margin, billToStartY + 7);
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    let currentYHeader = 65;
+    let currentYHeader = billToStartY + 13;
     
     if (order.customerPhone) {
       doc.setFont("helvetica", "bold");
@@ -384,6 +542,22 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
     doc.text(`INR ${order.grandTotal.toFixed(2)}`, rightMarginX, currentYSummary, { align: 'right' });
 
     // Terms and Conditions Section
+    // Amount in words (placed below grand total, above terms)
+    try {
+      const amountWords = numberToWords(order.grandTotal);
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60);
+      const wordsY = currentYSummary + 12;
+      // wrap text to fit page width (left margin to summaryLabelX - 8)
+      const availableWidth = summaryLabelX - margin - 4;
+      const split = doc.splitTextToSize(amountWords, availableWidth);
+      doc.text('Amount (in words):', margin, wordsY);
+      doc.text(split, margin + 36, wordsY);
+    } catch (e) {
+      console.warn('Failed to render amount in words', e);
+    }
+
     const footerY = 255;
     const termsY = Math.max(footerY - 65, currentYSummary + 15);
     
@@ -493,7 +667,7 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button 
-                      onClick={() => generatePDF(order)}
+                      onClick={() => void generatePDF(order)}
                       className="inline-flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-bold bg-indigo-50 px-3 py-1.5 rounded-md transition-colors"
                     >
                       <Download size={14} />
@@ -581,6 +755,37 @@ const Orders: React.FC<OrdersProps> = ({ state, updateState }) => {
                 <div className="space-y-4 mb-6">
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
                     <h3 className="text-xs font-bold text-indigo-600 uppercase tracking-widest border-b border-indigo-50 pb-1 mb-2">Customer Details</h3>
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Populate from Vendor</label>
+                        <select
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50/50 outline-none focus:ring-2 focus:ring-indigo-400"
+                          value={selectedVendorId}
+                          onChange={(e) => {
+                            const vid = e.target.value;
+                            setSelectedVendorId(vid);
+                            if (!vid) {
+                              // clear
+                              updateSessionField('customerName', '');
+                              updateSessionField('customerPhone', '');
+                              updateSessionField('customerAddress', '');
+                              updateSessionField('customerGstin', '');
+                              return;
+                            }
+                            const vendor = state.vendors.find(v => v.id === vid);
+                            if (vendor) {
+                              updateSessionField('customerName', vendor.name || '');
+                              updateSessionField('customerPhone', vendor.contact || '');
+                              updateSessionField('customerAddress', vendor.address || '');
+                              updateSessionField('customerGstin', vendor.gstin || '');
+                            }
+                          }}
+                        >
+                          <option value="">-- Select vendor to populate --</option>
+                          {state.vendors.map(v => (
+                            <option key={v.id} value={v.id}>{v.name}</option>
+                          ))}
+                        </select>
+                      </div>
                     <div>
                       <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Full Name *</label>
                       <input 
